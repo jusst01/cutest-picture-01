@@ -35,8 +35,6 @@ def clamp(v, low=0.0, high=1.0):
     return max(low, min(high, v))
 
 def blend_pixel(bg, fg, alpha):
-    # bg, fg: (r, g, b) tuples in 0..255
-    # alpha: 0.0 to 1.0
     if alpha <= 0:
         return bg
     if alpha >= 1:
@@ -84,10 +82,15 @@ def rotated_ellipse_sdf(x, y, cx, cy, rx, ry, angle_deg):
     return ellipse_sdf(0, 0, -rx_coord, -ry_coord, rx, ry)
 
 def star4_sdf(x, y, cx, cy, r):
-    # 4-point star approximated by union of two capsules or diamond + rotated square
-    d1 = capsule_sdf(x, y, cx, cy - r, cx, cy + r, r * 0.3)
-    d2 = capsule_sdf(x, y, cx - r, cy, cx + r, cy, r * 0.3)
-    return min(d1, d2)
+    d_vert = capsule_sdf(x, y, cx, cy - r, cx, cy + r, r * 0.18)
+    d_horiz = capsule_sdf(x, y, cx - r, cy, cx + r, cy, r * 0.18)
+    return min(d_vert, d_horiz)
+
+def arc_bottom_sdf(x, y, cx, cy, r, thickness):
+    d_circ = abs(math.sqrt((x - cx)**2 + (y - cy)**2) - r) - thickness / 2.0
+    if y < cy - 1:
+        return 1000.0
+    return d_circ
 
 class Canvas:
     def __init__(self, width, height, bg_color):
@@ -123,42 +126,6 @@ class Canvas:
                     if tot_alpha > 0.001:
                         idx = row_idx + x
                         pixels[idx] = blend_pixel(pixels[idx], color, tot_alpha)
-
-    def draw_shape_gradient(self, sdf_func, color_top, color_bot, y_top, y_bot, alpha=1.0, feather=1.5, bbox=None, clip_func=None):
-        if bbox is None:
-            xmin, ymin, xmax, ymax = 0, 0, self.width, self.height
-        else:
-            xmin, ymin, xmax, ymax = bbox
-            xmin = max(0, int(xmin - feather - 2))
-            ymin = max(0, int(ymin - feather - 2))
-            xmax = min(self.width, int(xmax + feather + 2))
-            ymax = min(self.height, int(ymax + feather + 2))
-
-        pixels = self.pixels
-        w = self.width
-        y_span = max(1.0, float(y_bot - y_top))
-
-        for y in range(ymin, ymax):
-            row_idx = y * w
-            t_fac = clamp((y - y_top) / y_span)
-            r_c = int(color_top[0] * (1 - t_fac) + color_bot[0] * t_fac + 0.5)
-            g_c = int(color_top[1] * (1 - t_fac) + color_bot[1] * t_fac + 0.5)
-            b_c = int(color_top[2] * (1 - t_fac) + color_bot[2] * t_fac + 0.5)
-            curr_color = (r_c, g_c, b_c)
-
-            for x in range(xmin, xmax):
-                if clip_func is not None and clip_func(x, y) > 0:
-                    continue
-                d = sdf_func(x, y)
-                if d <= feather:
-                    if d <= -feather:
-                        cov = 1.0
-                    else:
-                        cov = clamp(0.5 - d / (2.0 * feather))
-                    tot_alpha = alpha * cov
-                    if tot_alpha > 0.001:
-                        idx = row_idx + x
-                        pixels[idx] = blend_pixel(pixels[idx], curr_color, tot_alpha)
 
 def render():
     t0 = time.time()
@@ -199,7 +166,6 @@ def render():
         lambda x, y: ellipse_sdf(x, y, 512, 762, 238, 188),
         FUR, alpha=1.0, feather=2.0, bbox=body_bbox
     )
-    # Belly (clipped by body)
     body_sdf = lambda x, y: ellipse_sdf(x, y, 512, 762, 238, 188)
     canvas.draw_shape(
         lambda x, y: ellipse_sdf(x, y, 512, 806, 152, 118),
@@ -215,13 +181,11 @@ def render():
             FUR_DARK, alpha=1.0, feather=2.0,
             bbox=(fx-82, 908-46, fx+82, 908+46)
         )
-        # Toe pad bean
         canvas.draw_shape(
             lambda x, y, cx=fx: ellipse_sdf(x, y, cx, 896, 26, 16),
             CREAM, alpha=1.0, feather=1.5,
             bbox=(fx-26, 896-16, fx+26, 896+16)
         )
-        # Three small toe circles above pad
         for dx in [-18, 0, 18]:
             canvas.draw_shape(
                 lambda x, y, cx=fx+dx: circle_sdf(x, y, cx, 876, 10),
@@ -231,17 +195,14 @@ def render():
 
     # 7. Ears (behind head)
     for ex in [322, 702]:
-        # Cream outer
         canvas.draw_shape(
             lambda x, y, cx=ex: circle_sdf(x, y, cx, 252, 82),
             CREAM, alpha=1.0, feather=2.0, bbox=(ex-82, 252-82, ex+82, 252+82)
         )
-        # Fur inner
         canvas.draw_shape(
             lambda x, y, cx=ex: circle_sdf(x, y, cx, 262, 63),
             FUR, alpha=1.0, feather=2.0, bbox=(ex-63, 262-63, ex+63, 262+63)
         )
-        # Dark tip
         canvas.draw_shape(
             lambda x, y, cx=ex: circle_sdf(x, y, cx, 196, 26),
             FUR_DARK, alpha=1.0, feather=1.5, bbox=(ex-26, 196-26, ex+26, 196+26)
@@ -254,7 +215,6 @@ def render():
         FUR, alpha=1.0, feather=2.0, bbox=head_bbox
     )
     head_sdf = lambda x, y: circle_sdf(x, y, 512, 428, 238)
-    # Head soft shade
     canvas.draw_shape(
         lambda x, y: ellipse_sdf(x, y, 600, 560, 230, 150),
         FUR_SHADE, alpha=0.25, feather=60,
@@ -262,7 +222,7 @@ def render():
         clip_func=head_sdf
     )
 
-    # 9. Face mask (cream): union of ellipse cx512 cy486 rx168 ry18 and circle cx512 cy392 r96, clipped by head
+    # 9. Face mask (cream)
     mask_bbox = (512-168, 392-96, 512+168, 486+118)
     mask_shape_sdf = lambda x, y: min(
         ellipse_sdf(x, y, 512, 486, 168, 118),
@@ -282,7 +242,7 @@ def render():
             clip_func=head_sdf
         )
 
-    # 11. Tear marks (under eyes)
+    # 11. Tear marks
     canvas.draw_shape(
         lambda x, y: rotated_ellipse_sdf(x, y, 378, 508, 15, 54, 18),
         FUR_DARK, alpha=0.85, feather=3.0,
@@ -298,25 +258,21 @@ def render():
 
     # 12. Eyes
     for ex, ey in [(422, 438), (602, 438)]:
-        # Iris
         canvas.draw_shape(
             lambda x, y, cx=ex, cy=ey: ellipse_sdf(x, y, cx, cy, 37, 47),
             EYE_IRIS, alpha=1.0, feather=1.5,
             bbox=(ex-37, ey-47, ex+37, ey+47)
         )
-        # Pupil
         canvas.draw_shape(
             lambda x, y, cx=ex, cy=ey: ellipse_sdf(x, y, cx, cy, 31, 41),
             PUPIL, alpha=1.0, feather=1.5,
             bbox=(ex-31, ey-41, ex+31, ey+41)
         )
-        # Big catchlight
         canvas.draw_shape(
             lambda x, y, cx=ex-11, cy=ey-16: circle_sdf(x, y, cx, cy, 13),
             WHITE, alpha=1.0, feather=1.0,
             bbox=(ex-11-13, ey-16-13, ex-11+13, ey-16+13)
         )
-        # Small catchlight
         canvas.draw_shape(
             lambda x, y, cx=ex+11, cy=ey+18: circle_sdf(x, y, cx, cy, 6),
             WHITE, alpha=0.9, feather=1.0,
@@ -329,14 +285,13 @@ def render():
         NOSE, alpha=1.0, feather=1.5,
         bbox=(512-23, 522-15, 512+23, 522+15)
     )
-    # Nose catchlight
     canvas.draw_shape(
         lambda x, y: circle_sdf(x, y, 504, 516, 4),
         WHITE, alpha=0.8, feather=1.0,
         bbox=(500, 512, 508, 520)
     )
 
-    # 15. Blep (tongue) - drawn before mouth arcs
+    # 15. Blep (tongue)
     canvas.draw_shape(
         lambda x, y: ellipse_sdf(x, y, 512, 560, 18, 14),
         TONGUE, alpha=1.0, feather=1.5,
@@ -348,24 +303,90 @@ def render():
         bbox=(508, 548, 516, 570)
     )
 
-    # 14. Mouth arcs
+    # 14. Mouth arcs (corrected to bottom half arcs)
     for mx in [495, 529]:
         canvas.draw_shape(
-            lambda x, y, cx=mx: abs(circle_sdf(x, y, cx, 528, 16)) - 2.5,
-            MOUTH, alpha=1.0, feather=1.2,
-            bbox=(mx-16-3, 528-16-3, mx+16+3, 528+16+3)
+            lambda x, y, cx=mx: arc_bottom_sdf(x, y, cx, 528, 16, 4.0),
+            MOUTH, alpha=1.0, feather=1.0,
+            bbox=(mx-16-2, 528, mx+16+2, 528+16+2)
         )
 
-    # 16. Blush
+    # 16. Blush (stronger pink, smaller feather)
     for bx in [342, 682]:
         canvas.draw_shape(
             lambda x, y, cx=bx: ellipse_sdf(x, y, cx, 542, 42, 20),
-            BLUSH, alpha=0.45, feather=12.0,
-            bbox=(bx-42-12, 542-20-12, bx+42+12, 542+20+12)
+            BLUSH, alpha=0.6, feather=8.0,
+            bbox=(bx-42-8, 542-20-8, bx+42+8, 542+20+8)
         )
 
-    # 17. Leaf on head
-    leaf_cx, leaf_cy = 612, 196
+    # 18. Bamboo plush (in front of belly, hugged)
+    shoot_sdf = lambda x, y: capsule_sdf(x, y, 512, 700, 512, 872, 74)
+    canvas.draw_shape(
+        shoot_sdf, BAMBOO_BODY, alpha=1.0, feather=2.0,
+        bbox=(512-74-2, 700-2, 512+74+2, 872+2)
+    )
+    canvas.draw_shape(
+        lambda x, y: capsule_sdf(x, y, 512+22, 700, 512+22, 872, 74),
+        BAMBOO_SHADE, alpha=0.35, feather=10.0,
+        bbox=(512-74, 700, 512+96, 872),
+        clip_func=shoot_sdf
+    )
+    for sy in [762, 822]:
+        canvas.draw_shape(
+            lambda x, y, cy=sy: abs(capsule_sdf(x, y, 512-70, cy, 512+70, cy, 10)) - 3.0,
+            BAMBOO_SHADE, alpha=0.6, feather=1.2,
+            bbox=(512-75, cy-15, 512+75, cy+15),
+            clip_func=shoot_sdf
+        )
+    for lx, ly, ang in [(446, 682, -25), (512, 660, 0), (578, 682, 25)]:
+        canvas.draw_shape(
+            lambda x, y, cx=lx, cy=ly, a=ang: rotated_ellipse_sdf(x, y, cx, cy, 36, 16, a),
+            BAMBOO_LEAF, alpha=1.0, feather=1.5,
+            bbox=(lx-45, ly-25, lx+45, ly+25)
+        )
+    # Plush face (proper bottom half smile arc)
+    for px in [486, 538]:
+        canvas.draw_shape(
+            lambda x, y, cx=px: circle_sdf(x, y, cx, 772, 7.5),
+            BAMBOO_FACE, alpha=1.0, feather=1.0,
+            bbox=(px-8, 772-8, px+8, 772+8)
+        )
+    canvas.draw_shape(
+        lambda x, y: arc_bottom_sdf(x, y, 512, 784, 13, 3.5),
+        BAMBOO_FACE, alpha=1.0, feather=1.0,
+        bbox=(512-15, 784, 512+15, 784+15)
+    )
+    for bx in [462, 562]:
+        canvas.draw_shape(
+            lambda x, y, cx=bx: circle_sdf(x, y, cx, 790, 9),
+            BLUSH, alpha=0.6, feather=3.0,
+            bbox=(bx-12, 790-12, bx+12, 790+12)
+        )
+
+    # 19. Arms hugging
+    for ax1, ay1, ax2, ay2 in [
+        (318, 742, 448, 796),
+        (706, 742, 576, 796)
+    ]:
+        canvas.draw_shape(
+            lambda x, y, x1=ax1, y1=ay1, x2=ax2, y2=ay2: capsule_sdf(x, y, x1, y1, x2, y2, 28),
+            FUR, alpha=1.0, feather=2.0,
+            bbox=(min(ax1, ax2)-30, min(ay1, ay2)-30, max(ax1, ax2)+30, max(ay1, ay2)+30)
+        )
+        canvas.draw_shape(
+            lambda x, y, x1=ax1, y1=ay1+6, x2=ax2, y2=ay2+6: capsule_sdf(x, y, x1, y1, x2, y2, 24),
+            FUR_SHADE, alpha=0.3, feather=8.0,
+            bbox=(min(ax1, ax2)-30, min(ay1, ay2)-20, max(ax1, ax2)+30, max(ay1, ay2)+30)
+        )
+    for px, py in [(448, 796), (576, 796)]:
+        canvas.draw_shape(
+            lambda x, y, cx=px, cy=py: circle_sdf(x, y, cx, cy, 31),
+            FUR, alpha=1.0, feather=2.0,
+            bbox=(px-31, py-31, px+31, py+31)
+        )
+
+    # 17. Leaf on head (moved to top of head, fully visible in front of fur)
+    leaf_cx, leaf_cy = 580, 192
     canvas.draw_shape(
         lambda x, y: capsule_sdf(x, y, leaf_cx, leaf_cy+15, leaf_cx-10, leaf_cy-25, 3),
         BAMBOO_SHADE, alpha=1.0, feather=1.0,
@@ -382,78 +403,7 @@ def render():
         bbox=(leaf_cx-15, leaf_cy-30, leaf_cx+45, leaf_cy+20)
     )
 
-    # 18. Bamboo plush (in front of belly, hugged)
-    shoot_sdf = lambda x, y: capsule_sdf(x, y, 512, 700, 512, 872, 74)
-    canvas.draw_shape(
-        shoot_sdf, BAMBOO_BODY, alpha=1.0, feather=2.0,
-        bbox=(512-74-2, 700-2, 512+74+2, 872+2)
-    )
-    # Bamboo shade overlay (clipped by shoot)
-    canvas.draw_shape(
-        lambda x, y: capsule_sdf(x, y, 512+22, 700, 512+22, 872, 74),
-        BAMBOO_SHADE, alpha=0.35, feather=10.0,
-        bbox=(512-74, 700, 512+96, 872),
-        clip_func=shoot_sdf
-    )
-    # Segment rings on plush
-    for sy in [762, 822]:
-        canvas.draw_shape(
-            lambda x, y, cy=sy: abs(capsule_sdf(x, y, 512-70, cy, 512+70, cy, 10)) - 3.0,
-            BAMBOO_SHADE, alpha=0.5, feather=1.5,
-            bbox=(512-75, cy-15, 512+75, cy+15),
-            clip_func=shoot_sdf
-        )
-    # Plush top leaves
-    for lx, ly, ang in [(446, 682, -25), (512, 660, 0), (578, 682, 25)]:
-        canvas.draw_shape(
-            lambda x, y, cx=lx, cy=ly, a=ang: rotated_ellipse_sdf(x, y, cx, cy, 36, 16, a),
-            BAMBOO_LEAF, alpha=1.0, feather=1.5,
-            bbox=(lx-45, ly-25, lx+45, ly+25)
-        )
-    # Plush face
-    for px in [486, 538]:
-        canvas.draw_shape(
-            lambda x, y, cx=px: circle_sdf(x, y, cx, 772, 7.5),
-            BAMBOO_FACE, alpha=1.0, feather=1.0,
-            bbox=(px-8, 772-8, px+8, 772+8)
-        )
-    canvas.draw_shape(
-        lambda x, y: abs(circle_sdf(x, y, 512, 784, 13)) - 2.2,
-        BAMBOO_FACE, alpha=1.0, feather=1.2,
-        bbox=(512-16, 784-16, 512+16, 784+16)
-    )
-    for bx in [462, 562]:
-        canvas.draw_shape(
-            lambda x, y, cx=bx: circle_sdf(x, y, cx, 790, 9),
-            BLUSH, alpha=0.5, feather=4.0,
-            bbox=(bx-12, 790-12, bx+12, 790+12)
-        )
-
-    # 19. Arms hugging
-    for ax1, ay1, ax2, ay2 in [
-        (318, 742, 448, 796),
-        (706, 742, 576, 796)
-    ]:
-        canvas.draw_shape(
-            lambda x, y, x1=ax1, y1=ay1, x2=ax2, y2=ay2: capsule_sdf(x, y, x1, y1, x2, y2, 28),
-            FUR, alpha=1.0, feather=2.0,
-            bbox=(min(ax1, ax2)-30, min(ay1, ay2)-30, max(ax1, ax2)+30, max(ay1, ay2)+30)
-        )
-        # Shade under arm
-        canvas.draw_shape(
-            lambda x, y, x1=ax1, y1=ay1+6, x2=ax2, y2=ay2+6: capsule_sdf(x, y, x1, y1, x2, y2, 24),
-            FUR_SHADE, alpha=0.3, feather=8.0,
-            bbox=(min(ax1, ax2)-30, min(ay1, ay2)-20, max(ax1, ax2)+30, max(ay1, ay2)+30)
-        )
-    # Paws over plush
-    for px, py in [(448, 796), (576, 796)]:
-        canvas.draw_shape(
-            lambda x, y, cx=px, cy=py: circle_sdf(x, y, cx, cy, 31),
-            FUR, alpha=1.0, feather=2.0,
-            bbox=(px-31, py-31, px+31, py+31)
-        )
-
-    # 20. Sparkles
+    # 20. Sparkles (sharp 4-point stars)
     sparkles = [
         (196, 296, 27),
         (836, 352, 20),
@@ -462,13 +412,12 @@ def render():
     for sx, sy, sr in sparkles:
         canvas.draw_shape(
             lambda x, y, cx=sx, cy=sy, r=sr: star4_sdf(x, y, cx, cy, r),
-            WHITE, alpha=0.85, feather=1.5,
+            WHITE, alpha=0.9, feather=1.2,
             bbox=(sx-sr, sy-sr, sx+sr, sy+sr)
         )
-        # Tiny companion dots
         canvas.draw_shape(
             lambda x, y, cx=sx+sr+8, cy=sy-6: circle_sdf(x, y, cx, cy, 4),
-            WHITE, alpha=0.8, feather=1.0,
+            WHITE, alpha=0.85, feather=1.0,
             bbox=(sx+sr+2, sy-12, sx+sr+14, sy)
         )
 
@@ -476,11 +425,10 @@ def render():
     return canvas.pixels
 
 def save_png(filepath, width, height, pixels):
-    # Pack RGB pixels into raw bytes with filter byte 0 per row
     row_size = width * 3
     raw_data = bytearray()
     for y in range(height):
-        raw_data.append(0) # filter type 0
+        raw_data.append(0)
         start = y * width
         end = start + width
         for px in pixels[start:end]:
@@ -491,7 +439,7 @@ def save_png(filepath, width, height, pixels):
     def chunk(tag, data):
         return struct.pack("!I", len(data)) + tag + data + struct.pack("!I", zlib.crc32(tag + data) & 0xFFFFFFFF)
 
-    ihdr = struct.pack("!IIBBBBB", width, height, 8, 2, 0, 0, 0) # 8-bit RGB
+    ihdr = struct.pack("!IIBBBBB", width, height, 8, 2, 0, 0, 0)
 
     png = bytearray(b"\x89PNG\r\n\x1a\n")
     png.extend(chunk(b"IHDR", ihdr))
@@ -502,10 +450,7 @@ def save_png(filepath, width, height, pixels):
         f.write(png)
 
 def generate_thumbnail(in_path, out_path, thumb_size=300):
-    # Read PNG back or downsample from pixels directly
-    # Since we have render(), let's write a fast thumbnail generator using box averaging on pixels
     pixels = render()
-    # Box downsample from 1024 to thumb_size
     step = WIDTH / thumb_size
     thumb_pixels = []
     for ty in range(thumb_size):
