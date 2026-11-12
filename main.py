@@ -82,8 +82,9 @@ def rotated_ellipse_sdf(x, y, cx, cy, rx, ry, angle_deg):
     return ellipse_sdf(0, 0, -rx_coord, -ry_coord, rx, ry)
 
 def star4_sdf(x, y, cx, cy, r):
-    d_vert = capsule_sdf(x, y, cx, cy - r, cx, cy + r, r * 0.18)
-    d_horiz = capsule_sdf(x, y, cx - r, cy, cx + r, cy, r * 0.18)
+    # Pointier 4-point star (narrower waist ratio 0.08)
+    d_vert = capsule_sdf(x, y, cx, cy - r, cx, cy + r, r * 0.08)
+    d_horiz = capsule_sdf(x, y, cx - r, cy, cx + r, cy, r * 0.08)
     return min(d_vert, d_horiz)
 
 def arc_bottom_sdf(x, y, cx, cy, r, thickness):
@@ -303,7 +304,7 @@ def render():
         bbox=(508, 548, 516, 570)
     )
 
-    # 14. Mouth arcs (corrected to bottom half arcs)
+    # 14. Mouth arcs
     for mx in [495, 529]:
         canvas.draw_shape(
             lambda x, y, cx=mx: arc_bottom_sdf(x, y, cx, 528, 16, 4.0),
@@ -311,7 +312,7 @@ def render():
             bbox=(mx-16-2, 528, mx+16+2, 528+16+2)
         )
 
-    # 16. Blush (stronger pink, smaller feather)
+    # 16. Blush
     for bx in [342, 682]:
         canvas.draw_shape(
             lambda x, y, cx=bx: ellipse_sdf(x, y, cx, 542, 42, 20),
@@ -319,23 +320,23 @@ def render():
             bbox=(bx-42-8, 542-20-8, bx+42+8, 542+20+8)
         )
 
-    # 18. Bamboo plush (in front of belly, hugged)
-    shoot_sdf = lambda x, y: capsule_sdf(x, y, 512, 700, 512, 872, 74)
+    # 18. Bamboo plush (in front of belly, hugged) - with rounded organic shoot silhouette (rounded box / larger radius capsule)
+    shoot_sdf = lambda x, y: capsule_sdf(x, y, 512, 704, 512, 868, 76)
     canvas.draw_shape(
-        shoot_sdf, BAMBOO_BODY, alpha=1.0, feather=2.0,
-        bbox=(512-74-2, 700-2, 512+74+2, 872+2)
+        shoot_sdf, BAMBOO_BODY, alpha=1.0, feather=2.5,
+        bbox=(512-76-3, 704-3, 512+76+3, 868+3)
     )
     canvas.draw_shape(
-        lambda x, y: capsule_sdf(x, y, 512+22, 700, 512+22, 872, 74),
-        BAMBOO_SHADE, alpha=0.35, feather=10.0,
-        bbox=(512-74, 700, 512+96, 872),
+        lambda x, y: capsule_sdf(x, y, 512+22, 704, 512+22, 868, 76),
+        BAMBOO_SHADE, alpha=0.35, feather=12.0,
+        bbox=(512-76, 704, 512+98, 868),
         clip_func=shoot_sdf
     )
     for sy in [762, 822]:
         canvas.draw_shape(
-            lambda x, y, cy=sy: abs(capsule_sdf(x, y, 512-70, cy, 512+70, cy, 10)) - 3.0,
-            BAMBOO_SHADE, alpha=0.6, feather=1.2,
-            bbox=(512-75, cy-15, 512+75, cy+15),
+            lambda x, y, cy=sy: abs(capsule_sdf(x, y, 512-70, cy, 512+70, cy, 12)) - 3.5,
+            BAMBOO_SHADE, alpha=0.6, feather=1.5,
+            bbox=(512-78, cy-16, 512+78, cy+16),
             clip_func=shoot_sdf
         )
     for lx, ly, ang in [(446, 682, -25), (512, 660, 0), (578, 682, 25)]:
@@ -344,7 +345,7 @@ def render():
             BAMBOO_LEAF, alpha=1.0, feather=1.5,
             bbox=(lx-45, ly-25, lx+45, ly+25)
         )
-    # Plush face (proper bottom half smile arc)
+    # Plush face
     for px in [486, 538]:
         canvas.draw_shape(
             lambda x, y, cx=px: circle_sdf(x, y, cx, 772, 7.5),
@@ -385,7 +386,7 @@ def render():
             bbox=(px-31, py-31, px+31, py+31)
         )
 
-    # 17. Leaf on head (moved to top of head, fully visible in front of fur)
+    # 17. Leaf on head
     leaf_cx, leaf_cy = 580, 192
     canvas.draw_shape(
         lambda x, y: capsule_sdf(x, y, leaf_cx, leaf_cy+15, leaf_cx-10, leaf_cy-25, 3),
@@ -403,7 +404,7 @@ def render():
         bbox=(leaf_cx-15, leaf_cy-30, leaf_cx+45, leaf_cy+20)
     )
 
-    # 20. Sparkles (sharp 4-point stars)
+    # 20. Sparkles (sharp pointier 4-point stars)
     sparkles = [
         (196, 296, 27),
         (836, 352, 20),
@@ -449,41 +450,11 @@ def save_png(filepath, width, height, pixels):
     with open(filepath, "wb") as f:
         f.write(png)
 
-def generate_thumbnail(in_path, out_path, thumb_size=300):
-    pixels = render()
-    step = WIDTH / thumb_size
-    thumb_pixels = []
-    for ty in range(thumb_size):
-        y0 = int(ty * step)
-        y1 = int((ty + 1) * step)
-        y1 = max(y0 + 1, min(WIDTH, y1))
-        for tx in range(thumb_size):
-            x0 = int(tx * step)
-            x1 = int((tx + 1) * step)
-            x1 = max(x0 + 1, min(WIDTH, x1))
-
-            r_sum = g_sum = b_sum = count = 0
-            for y in range(y0, y1):
-                row_idx = y * WIDTH
-                for x in range(x0, x1):
-                    p = pixels[row_idx + x]
-                    r_sum += p[0]
-                    g_sum += p[1]
-                    b_sum += p[2]
-                    count += 1
-            thumb_pixels.append((r_sum // count, g_sum // count, b_sum // count))
-
-    save_png(out_path, thumb_size, thumb_size, thumb_pixels)
-
 if __name__ == "__main__":
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "out")
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "entry.png")
 
     pixels = render()
     save_png(out_path, WIDTH, HEIGHT, pixels)
     print(f"Saved entry to {out_path}")
-
-    os.makedirs("/tmp/scratch", exist_ok=True)
-    generate_thumbnail(out_path, "/tmp/scratch/thumb.png", 300)
-    print("Saved thumbnail to /tmp/scratch/thumb.png")
